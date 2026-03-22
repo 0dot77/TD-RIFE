@@ -212,3 +212,220 @@ TD-RIFE/
 ## 라이선스
 
 MIT License
+
+---
+
+# TD-RIFE (English)
+
+A **RIFE real-time video frame interpolation** plugin for TouchDesigner.
+
+Generates intermediate frames between two frames using AI to create **slow motion**, **frame interpolation**, and **time remapping** effects.
+
+![RIFE](https://img.shields.io/badge/RIFE-v4.9-blue) ![ONNX](https://img.shields.io/badge/ONNX-Runtime-green) ![TD](https://img.shields.io/badge/TouchDesigner-2025+-orange)
+
+## Features
+
+- Real-time frame interpolation based on **RIFE v4.9**
+- **ONNX Runtime GPU** acceleration (CUDA / TensorRT)
+- Arbitrary **Timestep** interpolation support — generate any point between 0.0 (Frame A) and 1.0 (Frame B)
+- Script TOP based — drop-in usage via `.tox`
+- Automatic resolution padding (pads to multiples of 32, restores original size on output)
+
+## Requirements
+
+| Item | Minimum | Recommended |
+|---|---|---|
+| TouchDesigner | 2025.30000+ | Latest build |
+| GPU | NVIDIA GTX 1060 (CUDA) | RTX 3060+ |
+| VRAM | 4GB | 8GB+ |
+| Python packages | `onnxruntime-gpu`, `numpy` | — |
+
+> **Note:** On Mac (Apple Silicon), only CPU mode is available due to lack of CUDA. Real-time performance requires an NVIDIA GPU.
+
+## Quick Start
+
+### Step 1: Download the Model
+
+In terminal:
+
+```bash
+cd TD-RIFE
+python scripts/download_model.py
+```
+
+Or download manually from [HuggingFace](https://huggingface.co/yuvraj108c/rife-onnx/tree/main):
+- File: `rife49_ensemble_True_scale_1_sim.onnx` (21.5MB)
+- Save to: `models/` folder
+
+### Step 2: Install Python Packages
+
+You need to install `onnxruntime-gpu` in TouchDesigner's Python environment.
+
+**Method A: TDPyEnvManager (built into TD 2025)**
+
+```
+# In TD Textport:
+import subprocess, sys
+subprocess.check_call([sys.executable, '-m', 'pip', 'install', 'onnxruntime-gpu'])
+```
+
+**Method B: From system terminal**
+
+```bash
+# Find TD's Python path and install directly
+# Windows example:
+"C:\Program Files\Derivative\TouchDesigner\bin\python.exe" -m pip install onnxruntime-gpu
+
+# macOS example (CPU only):
+/Applications/TouchDesigner.app/Contents/Frameworks/Python.framework/Versions/Current/bin/python3 -m pip install onnxruntime
+```
+
+### Step 3: Setup in TouchDesigner
+
+#### 3-1. Create Base COMP
+
+1. Right-click in the Network Editor → **Add Operator** → **COMP** → **Base**
+2. Rename to `TD_RIFE`
+3. Enter the Base COMP (double-click)
+
+#### 3-2. Create and Configure Script TOP
+
+1. Right-click inside → **Add Operator** → **TOP** → **Script**
+2. Rename to `script_rife`
+3. Paste the contents of `td/TDRIFE_Callbacks.py` into the Script TOP's **Callbacks DAT**
+   - Script TOP parameters → **Callbacks DAT** field → open the linked Text DAT and paste the code
+
+#### 3-3. Connect Inputs
+
+1. Prepare two frame sources for interpolation (e.g., 2 Movie File In TOPs, or Cache TOP + Delay)
+2. **input0** (left input): Previous frame (Frame A)
+3. **input1** (right input): Next frame (Frame B)
+
+#### 3-4. Parameter Settings
+
+After creating the Script TOP, parameters are automatically generated on the Custom page:
+
+| Parameter | Description | Default |
+|---|---|---|
+| **Timestep** | Interpolation position. 0.0=Frame A, 0.5=midpoint, 1.0=Frame B | `0.5` |
+| **Model Path** | Absolute path to the ONNX model file | (empty — must be set) |
+| **Provider** | Inference engine. CUDA (default), TensorRT (faster), CPU (slower) | `CUDA` |
+| **Active** | Enable/disable interpolation toggle | `On` |
+
+**How to set Model Path:**
+- Enter the **absolute path** to `models/rife49_ensemble_True_scale_1_sim.onnx`
+- Example: `C:/Users/username/Desktop/TD-RIFE/models/rife49_ensemble_True_scale_1_sim.onnx`
+
+#### 3-5. Using the Extension (Optional)
+
+For automatic model detection and dependency checking:
+
+1. Add a Text DAT to the Base COMP (`TD_RIFE`) → name: `text_extension`
+2. Paste the contents of `td/TDRIFE_Extension.py`
+3. Base COMP parameters → **Extensions** → OP: `text_extension`, Name: `TDRIFEExt`
+4. Run in Textport:
+
+```python
+op('TD_RIFE').ext.TDRIFEExt.CheckDependencies()  # Check packages
+op('TD_RIFE').ext.TDRIFEExt.DownloadModel()       # Download model
+op('TD_RIFE').ext.TDRIFEExt.Setup()                # Auto setup
+```
+
+## Usage Examples
+
+### Slow Motion (Video File)
+
+```
+[Movie File In TOP] ──→ [Cache TOP (size=2)] ──→ frame[0] ──→ [script_rife input0]
+                                                  frame[1] ──→ [script_rife input1]
+                                                               Timestep: 0.5
+                                                               ↓
+                                                           [Interpolated Frame]
+```
+
+1. Load video with **Movie File In TOP**
+2. Buffer 2 consecutive frames with **Cache TOP** (Size=2)
+3. Connect Cache's `[0]` and `[1]` to script_rife's input0 and input1 respectively
+4. Animate Timestep from 0.0 to 1.0 to smoothly transition between frames
+
+### Live Camera Input
+
+```
+[Video Device In TOP] ──→ [Cache TOP] ──→ [Delay TOP (1frame)] ──→ input0
+                              └─────────────────────────────────→ input1
+```
+
+1. Capture webcam with **Video Device In TOP**
+2. Store current frame with **Cache TOP**
+3. Generate previous frame with **Delay TOP** (1 frame)
+4. Connect both frames to script_rife
+
+### Multiple Interpolation (2x → 4x)
+
+Generate multiple interpolated frames with different Timestep values:
+
+```
+script_rife_1 (Timestep=0.25) ──→ [Switch TOP]
+script_rife_2 (Timestep=0.50) ──→     ↓
+script_rife_3 (Timestep=0.75) ──→ [Sequential output]
+```
+
+## Performance Guide
+
+| GPU | Resolution | Expected FPS | Notes |
+|---|---|---|---|
+| RTX 3060 | 720p | ~30 fps | Real-time capable |
+| RTX 3080 | 1080p | ~30 fps | Real-time capable |
+| RTX 4090 | 1080p | ~60 fps | High performance |
+| RTX 4090 | 4K | ~15 fps | Non-real-time |
+| GTX 1060 | 720p | ~10 fps | Non-real-time |
+
+> **Tip:** Using the TensorRT Provider is ~2x faster than CUDA (engine build takes several minutes on first run).
+
+## Troubleshooting
+
+### "Cannot find onnxruntime-gpu"
+→ Check the package installation from Step 2. You may need to restart TD.
+
+### "CUDAExecutionProvider not detected"
+→ `onnxruntime-gpu` must be installed instead of `onnxruntime`.
+→ Verify that CUDA Toolkit is installed.
+
+### Output is a black screen
+→ Check that Model Path is correctly set (absolute path).
+→ Verify that both input TOPs are connected.
+→ Make sure the Active toggle is On.
+
+### Slow performance
+→ Try changing Provider to `TensorRT`.
+→ Reduce input resolution (downscale with Resolution TOP).
+→ Set Script TOP's Cook Type to "Explicit" and cook only when needed.
+
+### NumPy version conflict error
+→ TD's built-in NumPy and onnxruntime's required version may conflict.
+→ Using TD 2025.30000+ is recommended (TDPyEnvManager built-in).
+
+## Project Structure
+
+```
+TD-RIFE/
+├── td/                          # TouchDesigner files
+│   ├── TDRIFE_Extension.py      # Base COMP Extension (auto setup, dependency check)
+│   └── TDRIFE_Callbacks.py      # Script TOP callbacks (core inference logic)
+├── scripts/
+│   └── download_model.py        # ONNX model download script
+├── models/                      # ONNX model storage folder (.gitignore)
+│   └── rife49_ensemble_*.onnx   # (download required)
+├── .gitignore
+└── README.md
+```
+
+## Credits
+
+- **RIFE** (Real-Time Intermediate Flow Estimation): [Practical-RIFE](https://github.com/hzwer/Practical-RIFE) by Zhewei Huang et al.
+- **ONNX Model**: [yuvraj108c/rife-onnx](https://huggingface.co/yuvraj108c/rife-onnx)
+- RIFE Paper: "Real-Time Intermediate Flow Estimation for Video Frame Interpolation" (ECCV 2022)
+
+## License
+
+MIT License
